@@ -1,15 +1,16 @@
 import torch, os, csv, time, datetime, sys, pickle, re
 import torch.nn as nn
+from torch.nn.utils.rnn import pad_sequence
 from torch.nn import Module
 from torch.utils.data import Dataset
 
 TRAIN_PATH = 'datasets/JSP/train.csv'
 WEIGHTS_PATH = 'weights/'
-EN_LENGTH = 512
-JA_LENGTH = 128
+EN_LENGTH = 95
+JA_LENGTH = 21_587
 VOCAB_SIZE = 259
 DEVICE = 'cuda'
-BATCH_SIZE = 256
+BATCH_SIZE = 16
 
 class JATokenizer:
     ''' Byte tokenization for English and Japanese '''
@@ -32,6 +33,7 @@ class JATokenizer:
                 45796, 49884, 50864, 51060, 51221, 51316, 51452, 51648, 54616, 57410, 58349, 134071
             ] # extended symbols
         ]
+        self.ja_ignore = re.compile(r'[\ue2fb\ue285\ue2fa\ue035\ue4c6\ue021\ue025\ue2f0\ue2f9\ue029\ue0fd\x95\x7f\ue045\x8d]')
 
         ja_count = 1
         for charset in self.symbol_ranges:
@@ -46,7 +48,7 @@ class JATokenizer:
 
     def ja_tokenize(self, txt):
         ''' Convert Japanese text to IDs '''
-        txt = re.sub(r'[\ue2fb\ue285\ue2fa\ue035\ue4c6\ue021\ue025\ue2f0\ue2f9\ue029\ue0fd\x95\x7f\ue045\x8d]', '', txt)
+        txt = self.ja_ignore.sub('', txt)
         return [self.ja_tokens[c] for c in txt]
 
     def en_tokenize(self, txt):
@@ -66,23 +68,33 @@ class EN2JADataset(Dataset):
     
     def read_data(self):
         start = time.time()
+        samples = []
         with open(TRAIN_PATH, 'r', encoding='UTF-8') as file:
             reader = csv.reader(file, delimiter=',')
             for row in reader:
                 en, ja = row[1], row[2]
                 en_ids = self.tokenizer.en_tokenize(en)
                 ja_ids = self.tokenizer.ja_tokenize(ja)
-                self.samples.append((en_ids, ja_ids))
+                samples.append((en_ids, ja_ids))
 
                 if time.time() - start > 10:
                     start = time.time()
-                    print(f'[+] Processed {len(self.samples):,} samples')
+                    print(f'[+] Processed {len(samples):,} samples')
 
         with open(os.path.join('datasets', f'tensors_{datetime.datetime.now().strftime("%d-%m-%Y_%H-%S")}.pt'), 'wb') as file:
-            pickle.dump(self.samples, file)
+            pickle.dump(samples, file)
+        
+        # Convert to tensors
+        for en,ja in samples:
+            self.samples.append([torch.tensor(en), torch.tensor(ja)])
+        
+        print(f'[+] Read {len(self.samples):,} samples')
     
     def collate_fn(self, batch):
-        return batch
+        x,y = zip(*batch)
+        x = pad_sequence(x, batch_first=True, padding_value=0)
+        y = pad_sequence(y, batch_first=True, padding_value=0)
+        return x,y
 
 class EN2JAModel(Module):
     def __init__(self):
@@ -96,7 +108,7 @@ class EN2JAModel(Module):
 
         self.en_embedding = nn.Embedding(VOCAB_SIZE, self.d_model)
         self.en_dropout = nn.Dropout(self.dropout)
-        self.pos_embedding = nn.Embedding(EN_LENGTH, self.d_model)
+        self.pos_embedding = nn.Embedding(JA_LENGTH, self.d_model)
 
         self.transformer = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(
@@ -109,7 +121,7 @@ class EN2JAModel(Module):
             ),
             num_layers=self.num_layers
         )
-        self.ja_proj = nn.Linear(self.d_model, JA_LENGTH)
+        self.ja_proj = nn.Linear(self.d_model, JA_LENGTH + 1)
     
     def forward(self, x):
 
@@ -128,8 +140,8 @@ class EN2JAModel(Module):
     def train_model(self):
         self.dataset.read_data()
         self.dataloader = torch.utils.data.DataLoader(self.dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=self.dataset.collate_fn)
-        self.optmizer = torch.optim.AdamW(self.parameters(), lr=1e-4)
-        loss_func = nn.CrossEntropyLoss()
+        self.optimizer = torch.optim.AdamW(self.parameters(), lr=1e-4)
+        loss_func = nn.CrossEntropyLoss(ignore_index=0)
         start = time.time()
         save_time = time.time()
 
@@ -137,15 +149,16 @@ class EN2JAModel(Module):
         for epoch in range(1000):
             total_loss = 0
             for n,(src,tgt) in enumerate(self.dataloader):
-                B,T,S = src.shape
+                B,S = src.shape
                 src = src.to(DEVICE)
                 tgt = tgt.to(DEVICE)
 
+                self.optimizer.zero_grad()
                 out = self.forward(src)
-                loss = loss_func(out, tgt)
+                loss = loss_func(out.transpose(1,2), tgt)
 
                 loss.backward()
-                self.optmizer.step()
+                self.optimizer.step()
                 total_loss += loss.item()
 
                 if time.time() - start > 10:
