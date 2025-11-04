@@ -1,13 +1,14 @@
-import torch, os, csv, time, datetime, sys
+import torch, os, csv, time, datetime, sys, pickle
 import torch.nn as nn
 from torch.nn import Module
 from torch.utils.data import Dataset
 from transformers import AutoTokenizer
 
-TRAIN_PATH = 'datasets/JSP/'
+TRAIN_PATH = 'datasets/JSP/train.csv'
 WEIGHTS_PATH = 'weights/'
 EN_LENGTH = 512
 JA_LENGTH = 128
+VOCAB_SIZE = 259
 DEVICE = 'cuda'
 BATCH_SIZE = 256
 
@@ -19,23 +20,28 @@ class EN2JADataset(Dataset):
     def __len__(self):
         return len(self.samples)
     
-    def __get__item__(self, idx):
+    def __getitem__(self, idx):
         return self.samples[idx]
     
     def read_data(self):
         start = time.time()
-        for file in os.listdir(TRAIN_PATH):
-            with open(os.path.join(TRAIN_PATH, file), 'r', encoding='UTF-8') as file:
-                reader = csv.reader(file, delimiter=',')
-                for row in reader:
-                    en, ja = row[0], row[1]
-                    en_ids = self.tokenizer(en, return_tensors='pt').input_ids
-                    ja_ids = self.tokenizer(ja, return_tensors='pt').input_ids
-                    self.samples.append((en_ids, ja_ids))
+        with open(TRAIN_PATH, 'r', encoding='UTF-8') as file:
+            reader = csv.reader(file, delimiter=',')
+            for row in reader:
+                en, ja = row[1], row[2]
+                en_ids = self.tokenizer(en).input_ids
+                ja_ids = self.tokenizer(ja).input_ids
+                self.samples.append((en_ids, ja_ids))
 
-                    if time.time() - start > 10:
-                        start = time.time()
-                        print(f'[+] Processed {len(self.samples):,} samples')
+                print([en_ids, ja_ids, en, ja])
+                input('STOP')
+
+                if time.time() - start > 10:
+                    start = time.time()
+                    print(f'[+] Processed {len(self.samples):,} samples')
+
+        with open(os.path.join('datasets', f'tensors_{datetime.datetime.now().strftime("%d-%m-%Y_%H-%S")}.pt'), 'wb') as file:
+            pickle.dump(self.samples, file)
     
     def collate_fn(self, batch):
         return batch
@@ -50,7 +56,7 @@ class EN2JAModel(Module):
         self.dropout = 0.05
         self.dataset = EN2JADataset()
 
-        self.en_embedding = nn.Embedding(EN_LENGTH, self.d_model)
+        self.en_embedding = nn.Embedding(VOCAB_SIZE, self.d_model)
         self.en_dropout = nn.Dropout(self.dropout)
         self.pos_embedding = nn.Embedding(EN_LENGTH, self.d_model)
 
