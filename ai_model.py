@@ -7,7 +7,7 @@ from torch.utils.data import Dataset
 TRAIN_PATH = 'datasets/JSP/train.csv'
 WEIGHTS_PATH = 'weights/'
 EN_LENGTH = 95
-JA_LENGTH = 21_587
+JA_LENGTH = 21_587 + 10
 VOCAB_SIZE = 259
 MAX_POS_EMB = 2048
 DEVICE = 'cuda'
@@ -110,8 +110,8 @@ class EN2JAModel(Module):
         self.en_embedding = nn.Embedding(VOCAB_SIZE, self.d_model)
         self.en_dropout = nn.Dropout(self.dropout)
 
-        self.pos_embedding_en = nn.Embedding(MAX_POS_EMB, self.d_model)
-        self.pos_embedding_ja = nn.Embedding(MAX_POS_EMB, self.d_model)
+        self.pos_embedding_en = nn.Embedding(MAX_POS_EMB, self.d_model, padding_idx=0)
+        self.pos_embedding_ja = nn.Embedding(MAX_POS_EMB, self.d_model, padding_idx=0)
 
         self.encoder = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(
@@ -138,7 +138,12 @@ class EN2JAModel(Module):
             num_layers=self.num_layers
         )
 
-        self.ja_proj = nn.Linear(self.d_model, JA_LENGTH + 1)
+        self.adaptive_softmax = nn.AdaptiveLogSoftmaxWithLoss(
+            in_features=self.d_model,
+            n_classes=JA_LENGTH+1,
+            cutoffs=[2000, 10_000],
+            div_value=4.0
+        )
     
     def forward(self, x, y):
 
@@ -151,7 +156,8 @@ class EN2JAModel(Module):
         memory = self.encoder(
             self.en_dropout(
                 self.en_embedding(x) + pos_x
-            )
+            ),
+            src_key_padding_mask = (x == 0)
         )
 
         causal_mask = torch.triu(torch.ones(Sy, Sy, dtype=torch.bool, device=DEVICE), diagonal=1)
@@ -161,17 +167,17 @@ class EN2JAModel(Module):
                 self.ja_embedding(y) + pos_y,
             ),
             memory,
-            tgt_mask = causal_mask
+            tgt_mask = causal_mask,
+            tgt_key_padding_mask = (y == 0),
+            memory_key_padding_mask = (x == 0)
         )
 
-        out = self.ja_proj(decoder_out)
-        return out
+        return decoder_out
     
     def train_model(self):
         self.dataset.read_data()
         self.dataloader = torch.utils.data.DataLoader(self.dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=self.dataset.collate_fn)
         self.optimizer = torch.optim.AdamW(self.parameters(), lr=1e-4)
-        loss_func = nn.CrossEntropyLoss(ignore_index=0)
         start = time.time()
         save_time = time.time()
 
@@ -179,7 +185,7 @@ class EN2JAModel(Module):
         for epoch in range(1000):
             total_loss = 0
             for n,(src,tgt) in enumerate(self.dataloader):
-                B,S = src.shape
+
                 src = src.to(DEVICE)
                 tgt = tgt.to(DEVICE)
 
@@ -187,8 +193,13 @@ class EN2JAModel(Module):
                 y_out = tgt[:, 1:]
 
                 self.optimizer.zero_grad()
+
                 out = self.forward(src, y_in)
-                loss = loss_func(out.transpose(1,2), y_out)
+                out2d = out.reshape(-1, out.size(-1))
+                tgt1d = y_out.reshape(-1)
+                mask = tgt1d != 0
+                out = self.adaptive_softmax(out2d[mask], tgt1d[mask])
+                loss = out.loss
 
                 loss.backward()
                 self.optimizer.step()
