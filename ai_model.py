@@ -2,7 +2,6 @@ import torch, os, csv, time, datetime, sys, pickle
 import torch.nn as nn
 from torch.nn import Module
 from torch.utils.data import Dataset
-from transformers import AutoTokenizer
 
 TRAIN_PATH = 'datasets/JSP/train.csv'
 WEIGHTS_PATH = 'weights/'
@@ -12,10 +11,42 @@ VOCAB_SIZE = 259
 DEVICE = 'cuda'
 BATCH_SIZE = 256
 
+class JATokenizer:
+    ''' Byte tokenization for English and Japanese '''
+    def __init__(self):
+        self.ja_tokens = {}
+        self.en_tokens = {}
+        self.symbol_ranges = [
+            range(0x3040, 0x309F + 1), # Hiragana
+            range(0x30A0, 0x30FF + 1), # Katakana
+            range(0x4E00, 0x9FFF + 1), # Kanji
+            range(0X3000, 0x303F + 1)  # Punctuation
+        ]
+
+        ja_count = 1
+        for charset in self.symbol_ranges:
+            for num in charset:
+                self.ja_tokens[chr(num)] = ja_count
+                ja_count += 1
+
+        en_count = 1
+        for num in range(0x20, 0x7E + 1): # English ASCII
+            self.en_tokens[chr(num)] = en_count
+            en_count += 1
+
+    def ja_tokenize(self, txt):
+        ''' Convert Japanese text to IDs '''
+        return [self.ja_tokens[c] for c in txt]
+
+    def en_tokenize(self, txt):
+        ''' Convert English text to IDs '''
+        print([txt])
+        return [self.en_tokens[c] for c in txt]
+
 class EN2JADataset(Dataset):
     def __init__(self):
         self.samples = []
-        self.tokenizer = AutoTokenizer.from_pretrained('google/byt5-small')
+        self.tokenizer = JATokenizer()
 
     def __len__(self):
         return len(self.samples)
@@ -29,12 +60,9 @@ class EN2JADataset(Dataset):
             reader = csv.reader(file, delimiter=',')
             for row in reader:
                 en, ja = row[1], row[2]
-                en_ids = self.tokenizer(en).input_ids
-                ja_ids = self.tokenizer(ja).input_ids
+                en_ids = self.tokenizer.en_tokenize(en)
+                ja_ids = self.tokenizer.ja_tokenize(ja)
                 self.samples.append((en_ids, ja_ids))
-
-                print([en_ids, ja_ids, en, ja])
-                input('STOP')
 
                 if time.time() - start > 10:
                     start = time.time()
