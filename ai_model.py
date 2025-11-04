@@ -1,4 +1,4 @@
-import torch, os, csv, time, datetime, sys, pickle
+import torch, os, csv, time, datetime, sys, pickle, re
 import torch.nn as nn
 from torch.nn import Module
 from torch.utils.data import Dataset
@@ -20,7 +20,14 @@ class JATokenizer:
             range(0x3040, 0x309F + 1), # Hiragana
             range(0x30A0, 0x30FF + 1), # Katakana
             range(0x4E00, 0x9FFF + 1), # Kanji
-            range(0X3000, 0x303F + 1)  # Punctuation
+            range(0X3000, 0x303F + 1), # Punctuation
+            range(0x20, 0x7E + 1),     # English ASCII
+            range(0x2000, 0x206F + 1), # General punctuation
+            [
+                0x27a1, 0x266a, 0x2500, 0x2501, 0xd7, 0xb7, 0x266b, 0x2606, 0xa, 0x9, 0x260e, 0x266c, 0x2192, 0x2985, 0x2986, 0x2190,
+                0x2605, 0xe8, 0xb0, 0x3c0, 0x25cb, 0x2764, 0x2642, 0x21d2, 0x3bc, 0x2212, 0x226a, 0x226b, 0xb6, 0x2665, 0x25cf, 0xe9,
+                0x25b2, 0x2228, 0x3b3, 0x266d, 0xea, 0xf7
+            ] # extended symbols
         ]
 
         ja_count = 1
@@ -36,11 +43,11 @@ class JATokenizer:
 
     def ja_tokenize(self, txt):
         ''' Convert Japanese text to IDs '''
+        txt = re.sub(r'[\ue2fb\ue285\ue2fa\ue035\ue4c6\ue021\ue025]', '', txt)
         return [self.ja_tokens[c] for c in txt]
 
     def en_tokenize(self, txt):
         ''' Convert English text to IDs '''
-        print([txt])
         return [self.en_tokens[c] for c in txt]
 
 class EN2JADataset(Dataset):
