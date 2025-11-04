@@ -9,6 +9,7 @@ WEIGHTS_PATH = 'weights/'
 EN_LENGTH = 95
 JA_LENGTH = 21_587
 VOCAB_SIZE = 259
+MAX_POS_EMB = 2048
 DEVICE = 'cuda'
 BATCH_SIZE = 16
 
@@ -103,14 +104,16 @@ class EN2JAModel(Module):
         self.nhead = self.d_model // 64
         self.dim_feedforward = self.d_model * 4
         self.num_layers = self.d_model // 128
-        self.dropout = 0.05
+        self.dropout = 0.0
         self.dataset = EN2JADataset()
 
         self.en_embedding = nn.Embedding(VOCAB_SIZE, self.d_model)
         self.en_dropout = nn.Dropout(self.dropout)
-        self.pos_embedding = nn.Embedding(JA_LENGTH, self.d_model)
 
-        self.transformer = nn.TransformerEncoder(
+        self.pos_embedding_en = nn.Embedding(MAX_POS_EMB, self.d_model)
+        self.pos_embedding_ja = nn.Embedding(MAX_POS_EMB, self.d_model)
+
+        self.encoder = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(
                 d_model=self.d_model,
                 nhead=self.nhead,
@@ -121,20 +124,47 @@ class EN2JAModel(Module):
             ),
             num_layers=self.num_layers
         )
+
+        self.ja_embedding = nn.Embedding(JA_LENGTH + 1, self.d_model)
+        self.decoder = nn.TransformerDecoder(
+            nn.TransformerDecoderLayer(
+                d_model=self.d_model,
+                nhead=self.nhead,
+                dim_feedforward=self.dim_feedforward,
+                dropout=self.dropout,
+                activation='relu',
+                batch_first=True
+            ),
+            num_layers=self.num_layers
+        )
+
         self.ja_proj = nn.Linear(self.d_model, JA_LENGTH + 1)
     
-    def forward(self, x):
+    def forward(self, x, y):
 
-        B, S = x.shape
-        pos = self.pos_embedding(torch.arange(S, device=DEVICE)).unsqueeze(0).expand(B, S, -1)
-        
-        out = self.ja_proj(
-            self.transformer(
-                self.en_dropout(
-                    self.en_embedding(x) + pos
-                )
+        Bx, Sx = x.shape
+        By, Sy = y.shape
+
+        pos_x = self.pos_embedding_en(torch.arange(Sx, device=DEVICE)).unsqueeze(0).expand(Bx, Sx, -1)
+        pos_y = self.pos_embedding_ja(torch.arange(Sy, device=DEVICE)).unsqueeze(0).expand(By, Sy, -1)
+
+        memory = self.encoder(
+            self.en_dropout(
+                self.en_embedding(x) + pos_x
             )
         )
+
+        causal_mask = torch.triu(torch.ones(Sy, Sy, dtype=torch.bool, device=DEVICE), diagonal=1)
+
+        decoder_out = self.decoder(
+            self.en_dropout(
+                self.ja_embedding(y) + pos_y,
+            ),
+            memory,
+            tgt_mask = causal_mask
+        )
+
+        out = self.ja_proj(decoder_out)
         return out
     
     def train_model(self):
@@ -153,9 +183,12 @@ class EN2JAModel(Module):
                 src = src.to(DEVICE)
                 tgt = tgt.to(DEVICE)
 
+                y_in = tgt[:, :-1]
+                y_out = tgt[:, 1:]
+
                 self.optimizer.zero_grad()
-                out = self.forward(src)
-                loss = loss_func(out.transpose(1,2), tgt)
+                out = self.forward(src, y_in)
+                loss = loss_func(out.transpose(1,2), y_out)
 
                 loss.backward()
                 self.optimizer.step()
