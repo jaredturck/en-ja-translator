@@ -11,13 +11,14 @@ VOCAB_SIZE = 259
 MAX_EMB = 2048
 TARGET_LOSS = 0.01
 DEVICE = 'cuda'
+TESTING_CAP = True
 
 BOS_ID = 1
 EOS_ID = 2
 UNK_ID = 3
 
 if platform.uname().node == 'Jared-PC':
-    BATCH_SIZE = 18
+    BATCH_SIZE = 10
 else:
     BATCH_SIZE = 78
 
@@ -97,6 +98,8 @@ class EN2JADataset(Dataset):
                     if time.time() - start > 10:
                         start = time.time()
                         print(f'[+] Processed {len(self.samples):,} samples')
+                        if TESTING_CAP and len(self.samples) >= 500_000:
+                            break
 
         print(f'[+] Read {len(self.samples):,} samples ({no_tokens:,} tokens)')
     
@@ -109,7 +112,7 @@ class EN2JADataset(Dataset):
 class EN2JAModel(Module):
     def __init__(self):
         super().__init__()
-        self.d_model = 256
+        self.d_model = 384
         self.nhead = self.d_model // 64
         self.dim_feedforward = self.d_model * 4
         self.num_layers = self.d_model // 128
