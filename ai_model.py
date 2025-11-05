@@ -1,4 +1,4 @@
-import torch, os, csv, time, datetime, sys, re, platform
+import torch, os, csv, time, datetime, sys, re, platform, math
 import torch.nn as nn
 from torch.nn.utils.rnn import pad_sequence
 from torch.nn import Module
@@ -225,7 +225,7 @@ class EN2JAModel(Module):
             print(f'Epoch {epoch+1}, avg loss {avg_loss:.4f}')
     
     def save_weights(self):
-        fname = os.path.join(WEIGHTS_PATH, f'weights_{datetime.datetime.now().strftime("%d-%m-%Y_%H-%S")}.pt')
+        fname = os.path.join(WEIGHTS_PATH, f'weights_{datetime.datetime.now().strftime("%d-%m-%Y_%H-%M")}.pt')
         torch.save(self.state_dict(), fname)
         print(f'[+] Weights saved {fname}')
     
@@ -250,6 +250,8 @@ class EN2JAModel(Module):
         )
 
         ja_seq = torch.tensor([[1]], device=DEVICE)
+        conf = []
+
         for _ in range(MAX_EMB):
             By, Sy = ja_seq.shape
             pos_y = self.pos_embedding_ja(torch.arange(Sy, device=DEVICE)).unsqueeze(0).expand(By, Sy, -1)
@@ -267,12 +269,16 @@ class EN2JAModel(Module):
             log_probs = self.adaptive_softmax.log_prob(last_h)
             next_token = torch.argmax(log_probs, dim=-1, keepdim=True)
             ja_seq = torch.cat([ja_seq, next_token], dim=1)
+            conf.append(log_probs[0, next_token.item()].item())
 
             if next_token.item() == 1:
                 break
         
         output = ''.join(self.dataset.tokenizer.ja_detokenize(ja_seq.tolist()[0][1:]))
+        token_conf = [round(math.exp(i),2) for i in conf]
+        overal_conf = round(math.exp(sum(conf) / len(conf)),2)
         print([output])
+        print([token_conf, overal_conf])
 
 if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] == 'train':
