@@ -283,6 +283,7 @@ if __name__ == '__main__':
             model.save_weights()
     else:
         model = EN2JAModel().to(DEVICE)
+        model.load_weights()
         while True:
             txt = input('> ')
             model.predict(txt)
