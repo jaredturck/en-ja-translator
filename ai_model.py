@@ -19,7 +19,7 @@ UNK_ID = 3
 if platform.uname().node == 'Jared-PC':
     BATCH_SIZE = 18
 else:
-    BATCH_SIZE = 80
+    BATCH_SIZE = 78
 
 class JATokenizer:
     ''' Byte tokenization for English and Japanese '''
@@ -83,6 +83,7 @@ class EN2JADataset(Dataset):
     
     def read_data(self):
         start = time.time()
+        no_tokens = 0
         for file in os.listdir(TRAIN_PATH):
             with open(os.path.join(TRAIN_PATH, file), 'r', encoding='UTF-8') as file:
                 reader = csv.reader(file, delimiter=',')
@@ -91,12 +92,13 @@ class EN2JADataset(Dataset):
                     en_ids = self.tokenizer.en_tokenize(en)[:MAX_EMB]
                     ja_ids = self.tokenizer.ja_tokenize(ja)[:MAX_EMB]
                     self.samples.append((torch.tensor(en_ids), torch.tensor(ja_ids)))
+                    no_tokens += len(en_ids) + len(ja_ids)
 
                     if time.time() - start > 10:
                         start = time.time()
                         print(f'[+] Processed {len(self.samples):,} samples')
 
-        print(f'[+] Read {len(self.samples):,} samples')
+        print(f'[+] Read {len(self.samples):,} samples ({no_tokens:,} tokens)')
     
     def collate_fn(self, batch):
         x,y = zip(*batch)
