@@ -7,9 +7,9 @@ from torch.utils.data import Dataset
 TRAIN_PATH = 'datasets/JSP/train.csv'
 WEIGHTS_PATH = 'weights/'
 EN_LENGTH = 95
-JA_LENGTH = 21_587 + 10
+JA_LENGTH = 21_588
 VOCAB_SIZE = 259
-MAX_POS_EMB = 2048
+MAX_EMB = 2048
 DEVICE = 'cuda'
 BATCH_SIZE = 16
 
@@ -41,7 +41,7 @@ class JATokenizer:
             for num in charset:
                 self.ja_tokens[chr(num)] = ja_count
                 ja_count += 1
-
+        
         en_count = 1
         for num in range(0x20, 0x7E + 1): # English ASCII
             self.en_tokens[chr(num)] = en_count
@@ -74,8 +74,8 @@ class EN2JADataset(Dataset):
             reader = csv.reader(file, delimiter=',')
             for row in reader:
                 en, ja = row[1], row[2]
-                en_ids = self.tokenizer.en_tokenize(en)
-                ja_ids = self.tokenizer.ja_tokenize(ja)
+                en_ids = self.tokenizer.en_tokenize(en)[:MAX_EMB]
+                ja_ids = self.tokenizer.ja_tokenize(ja)[:MAX_EMB]
                 samples.append((en_ids, ja_ids))
 
                 if time.time() - start > 10:
@@ -107,11 +107,11 @@ class EN2JAModel(Module):
         self.dropout = 0.0
         self.dataset = EN2JADataset()
 
-        self.en_embedding = nn.Embedding(VOCAB_SIZE, self.d_model)
+        self.en_embedding = nn.Embedding(VOCAB_SIZE + 1, self.d_model, padding_idx=0)
         self.en_dropout = nn.Dropout(self.dropout)
 
-        self.pos_embedding_en = nn.Embedding(MAX_POS_EMB, self.d_model, padding_idx=0)
-        self.pos_embedding_ja = nn.Embedding(MAX_POS_EMB, self.d_model, padding_idx=0)
+        self.pos_embedding_en = nn.Embedding(MAX_EMB + 1, self.d_model, padding_idx=0)
+        self.pos_embedding_ja = nn.Embedding(MAX_EMB + 1, self.d_model, padding_idx=0)
 
         self.encoder = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(
@@ -125,7 +125,7 @@ class EN2JAModel(Module):
             num_layers=self.num_layers
         )
 
-        self.ja_embedding = nn.Embedding(JA_LENGTH + 1, self.d_model)
+        self.ja_embedding = nn.Embedding(JA_LENGTH + 1, self.d_model, padding_idx=0)
         self.decoder = nn.TransformerDecoder(
             nn.TransformerDecoderLayer(
                 d_model=self.d_model,
