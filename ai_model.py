@@ -47,6 +47,8 @@ class JATokenizer:
             self.en_tokens[chr(num)] = en_count
             en_count += 1
 
+        self.rja_tokens = {v : k for k,v in self.ja_tokens.items()}
+
     def ja_tokenize(self, txt):
         ''' Convert Japanese text to IDs '''
         txt = self.ja_ignore.sub('', txt)
@@ -55,6 +57,10 @@ class JATokenizer:
     def en_tokenize(self, txt):
         ''' Convert English text to IDs '''
         return [self.en_tokens[c] for c in txt] + [1]
+    
+    def ja_detokenize(self, ids):
+        ''' Convert IDs to Japanese text '''
+        return [self.rja_tokens.get(i, '<UNK>') for i in ids]
 
 class EN2JADataset(Dataset):
     def __init__(self):
@@ -69,26 +75,18 @@ class EN2JADataset(Dataset):
     
     def read_data(self):
         start = time.time()
-        samples = []
         with open(TRAIN_PATH, 'r', encoding='UTF-8') as file:
             reader = csv.reader(file, delimiter=',')
             for row in reader:
                 en, ja = row[1], row[2]
                 en_ids = self.tokenizer.en_tokenize(en)[:MAX_EMB]
                 ja_ids = self.tokenizer.ja_tokenize(ja)[:MAX_EMB]
-                samples.append((en_ids, ja_ids))
+                self.samples.append((torch.tensor(en_ids), torch.tensor(ja_ids)))
 
                 if time.time() - start > 10:
                     start = time.time()
-                    print(f'[+] Processed {len(samples):,} samples')
+                    print(f'[+] Processed {len(self.samples):,} samples')
 
-        with open(os.path.join('datasets', f'tensors_{datetime.datetime.now().strftime("%d-%m-%Y_%H-%S")}.pt'), 'wb') as file:
-            pickle.dump(samples, file)
-        
-        # Convert to tensors
-        for en,ja in samples:
-            self.samples.append([torch.tensor(en), torch.tensor(ja)])
-        
         print(f'[+] Read {len(self.samples):,} samples')
     
     def collate_fn(self, batch):
@@ -208,7 +206,7 @@ class EN2JAModel(Module):
 
                 if time.time() - start > 10:
                     start = time.time()
-                    print(f'Epoch {epoch+1}, batch {n+1} of {len(self.dataloader)}, loss {loss.item():.4f}')
+                    print(f'Epoch {epoch+1}, batch {n+1:,} of {len(self.dataloader):,}, loss {loss.item():.4f}')
 
                     if time.time() - save_time > 600:
                         self.save_weights()
@@ -227,6 +225,44 @@ class EN2JAModel(Module):
             latest_file = max(files, key=os.path.getctime)
             self.load_state_dict(torch.load(latest_file))
             print(f'[+] Loaded weights {latest_file}')
+    
+    def predict(self, txt):
+        self.eval()
+
+        en_ids = self.dataset.tokenizer.en_tokenize(txt)[:MAX_EMB]
+        en = torch.tensor(en_ids, device=DEVICE).unsqueeze(0)
+
+        Bx, Sx = en.shape
+        pos_x = self.pos_embedding_en(torch.arange(Sx, device=DEVICE)).unsqueeze(0).expand(Bx, Sx, -1)
+        memory = self.encoder(
+            self.en_dropout(self.en_embedding(en) + pos_x),
+            src_key_padding_mask = (en == 0)
+        )
+
+        ja_seq = torch.tensor([[1]], device=DEVICE)
+        for _ in range(MAX_EMB):
+            By, Sy = ja_seq.shape
+            pos_y = self.pos_embedding_ja(torch.arange(Sy, device=DEVICE)).unsqueeze(0).expand(By, Sy, -1)
+            causal_mask = torch.triu(torch.ones(Sy, Sy, dtype=torch.bool, device=DEVICE), diagonal=1)
+
+            dec_out = self.decoder(
+                self.en_dropout(self.ja_embedding(ja_seq) + pos_y),
+                memory,
+                tgt_mask = causal_mask,
+                tgt_key_padding_mask = (ja_seq == 0),
+                memory_key_padding_mask = (en == 0)
+            )
+
+            last_h = dec_out[:, -1, :]
+            log_probs = self.adaptive_softmax.log_prob(last_h)
+            next_token = torch.argmax(log_probs, dim=-1, keepdim=True)
+            ja_seq = torch.cat([ja_seq, next_token], dim=1)
+
+            if next_token.item() == 1:
+                break
+        
+        output = ''.join(self.dataset.tokenizer.ja_detokenize(ja_seq.tolist()[0][1:]))
+        print([output])
 
 if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] == 'train':
@@ -235,3 +271,8 @@ if __name__ == '__main__':
             model.train_model()
         except KeyboardInterrupt:
             model.save_weights()
+    else:
+        model = EN2JAModel().to(DEVICE)
+        while True:
+            txt = input('> ')
+            model.predict(txt)
