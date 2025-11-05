@@ -285,8 +285,8 @@ class EN2JAModel(Module):
         output = ''.join(self.dataset.tokenizer.ja_detokenize(ja_seq.tolist()[0][1:]))
         token_conf = [round(math.exp(i),2) for i in conf]
         overal_conf = round(math.exp(sum(conf) / len(conf)),2)
-        print([output])
-        print([token_conf, overal_conf])
+        print(output.rstrip('<EOS>'))
+        # print([token_conf, overal_conf])
 
 if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] == 'train':
