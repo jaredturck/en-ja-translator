@@ -216,7 +216,9 @@ class EN2JAModel(Module):
             print(f'Epoch {epoch+1}, avg loss {total_loss / len(self.dataloader):.4f}')
     
     def save_weights(self):
-        torch.save(self.state_dict(), os.path.join(WEIGHTS_PATH, f'weights_{datetime.datetime.now().strftime("%d-%m-%Y_%H-%S")}.pt'))
+        fname = os.path.join(WEIGHTS_PATH, f'weights_{datetime.datetime.now().strftime("%d-%m-%Y_%H-%S")}.pt')
+        torch.save(self.state_dict(), fname)
+        print(f'[+] Weights saved {fname}')
 
 if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] == 'train':
