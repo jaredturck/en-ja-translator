@@ -11,7 +11,7 @@ VOCAB_SIZE = 259
 MAX_EMB = 2048
 TARGET_LOSS = 0.01
 DEVICE = 'cuda'
-TESTING_CAP = True
+TESTING_CAP = False
 
 BOS_ID = 1
 EOS_ID = 2
@@ -20,7 +20,7 @@ UNK_ID = 3
 if platform.uname().node == 'Jared-PC':
     BATCH_SIZE = 10
 else:
-    BATCH_SIZE = 78
+    BATCH_SIZE = 35
 
 class JATokenizer:
     ''' Byte tokenization for English and Japanese '''
