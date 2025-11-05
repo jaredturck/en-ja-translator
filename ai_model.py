@@ -11,13 +11,13 @@ JA_LENGTH = 21_588
 VOCAB_SIZE = 259
 MAX_EMB = 2048
 DEVICE = 'cuda'
-BATCH_SIZE = 16
+BATCH_SIZE = 18
 
 class JATokenizer:
     ''' Byte tokenization for English and Japanese '''
     def __init__(self):
-        self.ja_tokens = {}
-        self.en_tokens = {}
+        self.ja_tokens = {'<EOS>' : 1}
+        self.en_tokens = {'<EOS>' : 1}
         self.symbol_ranges = [
             range(0x3040, 0x309F + 1), # Hiragana
             range(0x30A0, 0x30FF + 1), # Katakana
@@ -36,13 +36,13 @@ class JATokenizer:
         ]
         self.ja_ignore = re.compile(r'[\ue2fb\ue285\ue2fa\ue035\ue4c6\ue021\ue025\ue2f0\ue2f9\ue029\ue0fd\x95\x7f\ue045\x8d]')
 
-        ja_count = 1
+        ja_count = 2
         for charset in self.symbol_ranges:
             for num in charset:
                 self.ja_tokens[chr(num)] = ja_count
                 ja_count += 1
         
-        en_count = 1
+        en_count = 2
         for num in range(0x20, 0x7E + 1): # English ASCII
             self.en_tokens[chr(num)] = en_count
             en_count += 1
@@ -50,11 +50,11 @@ class JATokenizer:
     def ja_tokenize(self, txt):
         ''' Convert Japanese text to IDs '''
         txt = self.ja_ignore.sub('', txt)
-        return [self.ja_tokens[c] for c in txt]
+        return [self.ja_tokens[c] for c in txt] + [1]
 
     def en_tokenize(self, txt):
         ''' Convert English text to IDs '''
-        return [self.en_tokens[c] for c in txt]
+        return [self.en_tokens[c] for c in txt] + [1]
 
 class EN2JADataset(Dataset):
     def __init__(self):
@@ -175,6 +175,7 @@ class EN2JAModel(Module):
         return decoder_out
     
     def train_model(self):
+        self.load_weights()
         self.dataset.read_data()
         self.dataloader = torch.utils.data.DataLoader(self.dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=self.dataset.collate_fn)
         self.optimizer = torch.optim.AdamW(self.parameters(), lr=1e-4)
@@ -219,6 +220,13 @@ class EN2JAModel(Module):
         fname = os.path.join(WEIGHTS_PATH, f'weights_{datetime.datetime.now().strftime("%d-%m-%Y_%H-%S")}.pt')
         torch.save(self.state_dict(), fname)
         print(f'[+] Weights saved {fname}')
+    
+    def load_weights(self):
+        files = [os.path.join(WEIGHTS_PATH, file) for file in os.listdir(WEIGHTS_PATH) if file.endswith('.pt')]
+        if files:
+            latest_file = max(files, key=os.path.getctime)
+            self.load_state_dict(torch.load(latest_file))
+            print(f'[+] Loaded weights {latest_file}')
 
 if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] == 'train':
