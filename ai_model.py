@@ -1,17 +1,22 @@
-import torch, os, csv, time, datetime, sys, pickle, re
+import torch, os, csv, time, datetime, sys, re, platform
 import torch.nn as nn
 from torch.nn.utils.rnn import pad_sequence
 from torch.nn import Module
 from torch.utils.data import Dataset
 
-TRAIN_PATH = 'datasets/JSP/train.csv'
+TRAIN_PATH = 'datasets/JSP/'
 WEIGHTS_PATH = 'weights/'
 EN_LENGTH = 95
 JA_LENGTH = 21_588
 VOCAB_SIZE = 259
 MAX_EMB = 2048
+TARGET_LOSS = 0.01
 DEVICE = 'cuda'
-BATCH_SIZE = 18
+
+if platform.uname().node == 'Jared-PC':
+    BATCH_SIZE = 18
+else:
+    BATCH_SIZE = 80
 
 class JATokenizer:
     ''' Byte tokenization for English and Japanese '''
@@ -75,17 +80,18 @@ class EN2JADataset(Dataset):
     
     def read_data(self):
         start = time.time()
-        with open(TRAIN_PATH, 'r', encoding='UTF-8') as file:
-            reader = csv.reader(file, delimiter=',')
-            for row in reader:
-                en, ja = row[1], row[2]
-                en_ids = self.tokenizer.en_tokenize(en)[:MAX_EMB]
-                ja_ids = self.tokenizer.ja_tokenize(ja)[:MAX_EMB]
-                self.samples.append((torch.tensor(en_ids), torch.tensor(ja_ids)))
+        for file in os.listdir(TRAIN_PATH):
+            with open(os.path.join(TRAIN_PATH, file), 'r', encoding='UTF-8') as file:
+                reader = csv.reader(file, delimiter=',')
+                for row in reader:
+                    en, ja = row[1], row[2]
+                    en_ids = self.tokenizer.en_tokenize(en)[:MAX_EMB]
+                    ja_ids = self.tokenizer.ja_tokenize(ja)[:MAX_EMB]
+                    self.samples.append((torch.tensor(en_ids), torch.tensor(ja_ids)))
 
-                if time.time() - start > 10:
-                    start = time.time()
-                    print(f'[+] Processed {len(self.samples):,} samples')
+                    if time.time() - start > 10:
+                        start = time.time()
+                        print(f'[+] Processed {len(self.samples):,} samples')
 
         print(f'[+] Read {len(self.samples):,} samples')
     
@@ -211,8 +217,12 @@ class EN2JAModel(Module):
                     if time.time() - save_time > 600:
                         self.save_weights()
                         save_time = time.time()
+
+            avg_loss = total_loss / len(self.dataloader)
+            if avg_loss <= TARGET_LOSS:
+                print(f'[+] Target loss reached')
                 
-            print(f'Epoch {epoch+1}, avg loss {total_loss / len(self.dataloader):.4f}')
+            print(f'Epoch {epoch+1}, avg loss {avg_loss:.4f}')
     
     def save_weights(self):
         fname = os.path.join(WEIGHTS_PATH, f'weights_{datetime.datetime.now().strftime("%d-%m-%Y_%H-%S")}.pt')
