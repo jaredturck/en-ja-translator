@@ -6,12 +6,15 @@ from torch.utils.data import Dataset
 
 TRAIN_PATH = 'datasets/JSP/'
 WEIGHTS_PATH = 'weights/'
-EN_LENGTH = 95
-JA_LENGTH = 21_588
+JA_LENGTH = 21_592
 VOCAB_SIZE = 259
 MAX_EMB = 2048
 TARGET_LOSS = 0.01
 DEVICE = 'cuda'
+
+BOS_ID = 1
+EOS_ID = 2
+UNK_ID = 3
 
 if platform.uname().node == 'Jared-PC':
     BATCH_SIZE = 18
@@ -21,8 +24,8 @@ else:
 class JATokenizer:
     ''' Byte tokenization for English and Japanese '''
     def __init__(self):
-        self.ja_tokens = {'<EOS>' : 1}
-        self.en_tokens = {'<EOS>' : 1}
+        self.ja_tokens = {'<BOS>' : BOS_ID, '<EOS>' : EOS_ID, '<UNK>' : UNK_ID}
+        self.en_tokens = {'<BOS>' : BOS_ID, '<EOS>' : EOS_ID, '<UNK>' : UNK_ID}
         self.symbol_ranges = [
             range(0x3040, 0x309F + 1), # Hiragana
             range(0x30A0, 0x30FF + 1), # Katakana
@@ -41,13 +44,13 @@ class JATokenizer:
         ]
         self.ja_ignore = re.compile(r'[\ue2fb\ue285\ue2fa\ue035\ue4c6\ue021\ue025\ue2f0\ue2f9\ue029\ue0fd\x95\x7f\ue045\x8d]')
 
-        ja_count = 2
+        ja_count = 4
         for charset in self.symbol_ranges:
             for num in charset:
                 self.ja_tokens[chr(num)] = ja_count
                 ja_count += 1
         
-        en_count = 2
+        en_count = 4
         for num in range(0x20, 0x7E + 1): # English ASCII
             self.en_tokens[chr(num)] = en_count
             en_count += 1
@@ -57,11 +60,11 @@ class JATokenizer:
     def ja_tokenize(self, txt):
         ''' Convert Japanese text to IDs '''
         txt = self.ja_ignore.sub('', txt)
-        return [self.ja_tokens[c] for c in txt] + [1]
+        return [BOS_ID] + [self.ja_tokens.get(c, UNK_ID) for c in txt] + [EOS_ID]
 
     def en_tokenize(self, txt):
         ''' Convert English text to IDs '''
-        return [self.en_tokens[c] for c in txt] + [1]
+        return [BOS_ID] + [self.en_tokens.get(c, UNK_ID) for c in txt] + [EOS_ID]
     
     def ja_detokenize(self, ids):
         ''' Convert IDs to Japanese text '''
@@ -108,7 +111,7 @@ class EN2JAModel(Module):
         self.nhead = self.d_model // 64
         self.dim_feedforward = self.d_model * 4
         self.num_layers = self.d_model // 128
-        self.dropout = 0.0
+        self.dropout = 0.1
         self.dataset = EN2JADataset()
 
         self.en_embedding = nn.Embedding(VOCAB_SIZE + 1, self.d_model, padding_idx=0)
@@ -249,7 +252,7 @@ class EN2JAModel(Module):
             src_key_padding_mask = (en == 0)
         )
 
-        ja_seq = torch.tensor([[1]], device=DEVICE)
+        ja_seq = torch.tensor([[BOS_ID]], device=DEVICE)
         conf = []
 
         for _ in range(MAX_EMB):
@@ -271,7 +274,7 @@ class EN2JAModel(Module):
             ja_seq = torch.cat([ja_seq, next_token], dim=1)
             conf.append(log_probs[0, next_token.item()].item())
 
-            if next_token.item() == 1:
+            if next_token.item() == EOS_ID:
                 break
         
         output = ''.join(self.dataset.tokenizer.ja_detokenize(ja_seq.tolist()[0][1:]))
