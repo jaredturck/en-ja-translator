@@ -239,8 +239,9 @@ class EN2JAModel(Module):
         torch.save(self.state_dict(), fname)
         print(f'[+] Weights saved {fname}')
     
-    def load_weights(self):
-        files = [os.path.join(WEIGHTS_PATH, file) for file in os.listdir(WEIGHTS_PATH) if file.endswith('.pt')]
+    def load_weights(self, weight_path=None):
+        weight_path = weight_path if weight_path else WEIGHTS_PATH
+        files = [os.path.join(weight_path, file) for file in os.listdir(weight_path) if file.endswith('.pt')]
         if files:
             latest_file = max(files, key=os.path.getctime)
             self.load_state_dict(torch.load(latest_file))
