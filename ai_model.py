@@ -10,7 +10,7 @@ JA_LENGTH = 21_592
 VOCAB_SIZE = 259
 MAX_EMB = 2048
 TARGET_LOSS = 0.01
-DEVICE = 'cuda'
+DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 TESTING_CAP = False
 
 BOS_ID = 1
@@ -229,6 +229,8 @@ class EN2JAModel(Module):
             avg_loss = total_loss / len(self.dataloader)
             if avg_loss <= TARGET_LOSS:
                 print(f'[+] Target loss reached')
+                self.save_weights()
+                return
                 
             print(f'Epoch {epoch+1}, avg loss {avg_loss:.4f}')
     
@@ -247,46 +249,48 @@ class EN2JAModel(Module):
     def predict(self, txt):
         self.eval()
 
-        en_ids = self.dataset.tokenizer.en_tokenize(txt)[:MAX_EMB]
-        en = torch.tensor(en_ids, device=DEVICE).unsqueeze(0)
+        with torch.no_grad():
+            en_ids = self.dataset.tokenizer.en_tokenize(txt)[:MAX_EMB]
+            en = torch.tensor(en_ids, device=DEVICE).unsqueeze(0)
 
-        Bx, Sx = en.shape
-        pos_x = self.pos_embedding_en(torch.arange(Sx, device=DEVICE)).unsqueeze(0).expand(Bx, Sx, -1)
-        memory = self.encoder(
-            self.en_dropout(self.en_embedding(en) + pos_x),
-            src_key_padding_mask = (en == 0)
-        )
-
-        ja_seq = torch.tensor([[BOS_ID]], device=DEVICE)
-        conf = []
-
-        for _ in range(MAX_EMB):
-            By, Sy = ja_seq.shape
-            pos_y = self.pos_embedding_ja(torch.arange(Sy, device=DEVICE)).unsqueeze(0).expand(By, Sy, -1)
-            causal_mask = torch.triu(torch.ones(Sy, Sy, dtype=torch.bool, device=DEVICE), diagonal=1)
-
-            dec_out = self.decoder(
-                self.en_dropout(self.ja_embedding(ja_seq) + pos_y),
-                memory,
-                tgt_mask = causal_mask,
-                tgt_key_padding_mask = (ja_seq == 0),
-                memory_key_padding_mask = (en == 0)
+            Bx, Sx = en.shape
+            pos_x = self.pos_embedding_en(torch.arange(Sx, device=DEVICE)).unsqueeze(0).expand(Bx, Sx, -1)
+            memory = self.encoder(
+                self.en_dropout(self.en_embedding(en) + pos_x),
+                src_key_padding_mask = (en == 0)
             )
 
-            last_h = dec_out[:, -1, :]
-            log_probs = self.adaptive_softmax.log_prob(last_h)
-            next_token = torch.argmax(log_probs, dim=-1, keepdim=True)
-            ja_seq = torch.cat([ja_seq, next_token], dim=1)
-            conf.append(log_probs[0, next_token.item()].item())
+            ja_seq = torch.tensor([[BOS_ID]], device=DEVICE)
+            conf = []
 
-            if next_token.item() == EOS_ID:
-                break
-        
-        output = ''.join(self.dataset.tokenizer.ja_detokenize(ja_seq.tolist()[0][1:]))
-        token_conf = [round(math.exp(i),2) for i in conf]
-        overal_conf = round(math.exp(sum(conf) / len(conf)),2)
-        print(output.rstrip('<EOS>'))
-        # print([token_conf, overal_conf])
+            for _ in range(MAX_EMB):
+                By, Sy = ja_seq.shape
+                pos_y = self.pos_embedding_ja(torch.arange(Sy, device=DEVICE)).unsqueeze(0).expand(By, Sy, -1)
+                causal_mask = torch.triu(torch.ones(Sy, Sy, dtype=torch.bool, device=DEVICE), diagonal=1)
+
+                dec_out = self.decoder(
+                    self.en_dropout(self.ja_embedding(ja_seq) + pos_y),
+                    memory,
+                    tgt_mask = causal_mask,
+                    tgt_key_padding_mask = (ja_seq == 0),
+                    memory_key_padding_mask = (en == 0)
+                )
+
+                last_h = dec_out[:, -1, :]
+                log_probs = self.adaptive_softmax.log_prob(last_h)
+                log_probs[:, 0] = -float('inf')  # prevent predicting padding
+                next_token = torch.argmax(log_probs, dim=-1, keepdim=True)
+                ja_seq = torch.cat([ja_seq, next_token], dim=1)
+                conf.append(log_probs[0, next_token.item()].item())
+
+                if next_token.item() == EOS_ID:
+                    break
+            
+            output = ''.join(self.dataset.tokenizer.ja_detokenize(ja_seq.tolist()[0][1:]))
+            token_conf = [round(math.exp(i),2) for i in conf]
+            overal_conf = round(math.exp(sum(conf) / len(conf)),2)
+            print(output.removesuffix('<EOS>'))
+            # print([token_conf, overal_conf])
 
 if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] == 'train':
