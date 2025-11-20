@@ -289,7 +289,7 @@ class EN2JAModel(Module):
             output = ''.join(self.dataset.tokenizer.ja_detokenize(ja_seq.tolist()[0][1:]))
             token_conf = [round(math.exp(i),2) for i in conf]
             overal_conf = round(math.exp(sum(conf) / len(conf)),2)
-            print(output.removesuffix('<EOS>'))
+            return output.removesuffix('<EOS>')
             # print([token_conf, overal_conf])
 
 if __name__ == '__main__':
@@ -304,4 +304,4 @@ if __name__ == '__main__':
         model.load_weights()
         while True:
             txt = input('> ')
-            model.predict(txt)
+            print(model.predict(txt))
