@@ -244,7 +244,7 @@ class EN2JAModel(Module):
         files = [os.path.join(weight_path, file) for file in os.listdir(weight_path) if file.endswith('.pt')]
         if files:
             latest_file = max(files, key=os.path.getctime)
-            self.load_state_dict(torch.load(latest_file))
+            self.load_state_dict(torch.load(latest_file, map_location=DEVICE))
             print(f'[+] Loaded weights {latest_file}')
     
     def predict(self, txt):
