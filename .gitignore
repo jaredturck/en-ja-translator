@@ -3,3 +3,4 @@
 
 .venv/
 qwen_model/
+__pycache__/
