@@ -1,3 +1,5 @@
 *.zip
-weights/*
-!weights/weights_06-11-2025_09-04.pt
+*.csv
+
+.venv/
+qwen_model/

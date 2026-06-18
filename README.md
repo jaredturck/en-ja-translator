@@ -1,18 +1,18 @@
 # Japanese to English Translator
-The model uses a transformer encoder to learn the patterns of the English text, which is then fed into a transformer decoder that predicts each token of the Japanese text. Separate language and positional embeddings are used for Japanese and English. Adaptive softmax is used to reduce VRAM and compute.
+This project fine tunes Qwen3-1.7B as an English-to-Japanese translator using supervised fine-tuning. Training uses prompt-and-completion examples.
 ```
-> cat
-猫
-> cat girls
-猫の子
+> python is a high level programming language, used for tasks like AI and websites
+JA: pythonは 人工知能やウェブサイトなどの 高度なプログラミング言語です
+> modern AI LLMs are used for language translation 
+JA: 近代のAI LLMは翻訳に使われます
 > 
 ```
 
 To train the model use:
 ```py
-python ai_model.py train
+accelerate launch --multi_gpu --num_processes=2 --mixed_precision=bf16 train.py
 ```
 For inference
 ```py
-python ai_model.py
+python main.py
 ```
